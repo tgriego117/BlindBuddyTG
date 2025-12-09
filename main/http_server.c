@@ -356,9 +356,9 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
     }
 
     // Pre-tilt close if needed so slats don't catch (only if no tilt active)
-    if (!__atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST) && tilt_status != 1) {
-        tilt_blinds_async(1); // CLOSE
-    }
+    //if (!__atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST) && tilt_status != 1) {
+    //    tilt_blinds_async(1); // CLOSE
+    //}
 
     // Move lift (async)
     ESP_LOGI(TAG, "Move %d%% -> %d%%", blinds_position, requested);
@@ -370,7 +370,7 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
     // Post-move tilt preference (only if not tilting)
     //if (!__atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST)) {
     //    tilt_blinds_async(requested == 50 ? 0 : 1);
-    //}
+    //}     
 
     return render_home(req);
 }

@@ -25,7 +25,7 @@
 #define STBY_GPIO              36   // H-bridge standby (active HIGH)
 
 // Map "forward" to CW or CCW (depends on your mechanical setup)
-#define FORWARD_IS_CW          1    // 1: forward=CW ; 0: forward=CCW
+#define FORWARD_IS_CW          0    // 1: forward=CW ; 0: forward=CCW
 
 // Choose how to stop the LIFT motor at the end of a move
 #define STOP_MODE_BRAKE        1    // 1: brake (AIN1=AIN2=1), 0: coast (AIN1=AIN2=0)
