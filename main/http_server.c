@@ -343,8 +343,8 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
     if (strstr(buf, "level=light"))       requested = 0;
     else if (strstr(buf, "level=medium")) requested = 50;
     else if (strstr(buf, "level=dark"))   requested = 100;
-    else if (strstr(buf, "delta=up10"))   requested = clamp_int(blinds_position + 10, 0, 100);
-    else if (strstr(buf, "delta=down10")) requested = clamp_int(blinds_position - 10, 0, 100);
+    else if (strstr(buf, "delta=up10"))   requested = clamp_int(blinds_position - 10, 0, 100);
+    else if (strstr(buf, "delta=down10")) requested = clamp_int(blinds_position + 10, 0, 100);
     else {
         httpd_resp_set_status(req, "400 Bad Request");
         return httpd_resp_sendstr(req, "Unknown command");
@@ -368,9 +368,9 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
     global_is_closed = (requested >= 100) ? 1 : 0;
 
     // Post-move tilt preference (only if not tilting)
-    if (!__atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST)) {
-        tilt_blinds_async(requested == 50 ? 0 : 1);
-    }
+    //if (!__atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST)) {
+    //    tilt_blinds_async(requested == 50 ? 0 : 1);
+    //}
 
     return render_home(req);
 }
