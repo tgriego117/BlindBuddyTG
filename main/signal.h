@@ -25,7 +25,7 @@
 #define STBY_GPIO              36   // H-bridge standby (active HIGH)
 
 // Map "forward" to CW or CCW (depends on your mechanical setup)
-#define FORWARD_IS_CW          0    // 1: forward=CW ; 0: forward=CCW
+#define FORWARD_IS_CW          1    // 1: forward=CW ; 0: forward=CCW
 
 // Choose how to stop the LIFT motor at the end of a move
 #define STOP_MODE_BRAKE        1    // 1: brake (AIN1=AIN2=1), 0: coast (AIN1=AIN2=0)
@@ -40,12 +40,12 @@
 #define LEDC_DUTY_MAX          ((1U<<10)-1)
 
 // Motion model (lift travel timing model)
-#define FULL_TRAVEL_MS         30000            // 0% <-> 100% travel = 30 s
+#define FULL_TRAVEL_MS         42500            // 0% <-> 100% travel = 30 s
 #define RUN_SPEED_PCT          90               // duty % during lift motion
 
 // Tilt timing (slat open/close jog)
-#define TILT_OPEN_MS           600  // ms spin to go CLOSED -> OPEN
-#define TILT_CLOSE_MS          600  // ms spin to go OPEN   -> CLOSED
+#define TILT_OPEN_MS           300  // ms spin to go CLOSED -> OPEN
+#define TILT_CLOSE_MS          300  // ms spin to go OPEN   -> CLOSED
 #define TILT_RUN_PCT           90   // PWM % for tilt jog
 
 // ===== Shared state exported to HTTP/UI =====

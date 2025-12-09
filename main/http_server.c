@@ -111,15 +111,16 @@ static void auto_light_task(void *pv)
             // If sensors swapped in your wiring, just swap here later.
 
             if (mode == AUTO_HIGH) {
-                // Full light: blinds up, slats open
-                move_blinds_to_percent_time_async(0);
-                tilt_blinds_async(0);
+        // Full light: blinds up, slats open
+                move_blinds_to_percent_time_async(100);  // 0% -> blinds up
+                //tilt_blinds_async(1);                  // 0=open => tilt_to_percent_core(100)
             }
             else if (mode == AUTO_LOW) {
-                // Blackout: blinds down, slats closed
-                move_blinds_to_percent_time_async(100);
-                tilt_blinds_async(1);
+        // Blackout: blinds down, slats closed
+                move_blinds_to_percent_time_async(0); // 100% -> blinds fully down
+                tilt_blinds_async(1);                   // 1=closed => tilt_to_percent_core(0)
             }
+
             else {
                 // Intermediate: blinds down, adjust tilt to hit target ratio
                 float target = auto_get_target_ratio(mode);
@@ -211,11 +212,11 @@ static esp_err_t render_home(httpd_req_t *req) {
         "<h2>Automatic Light Level</h2>"
         "<form method='POST' action='/auto'><div class='row'>"
         "<button name='mode' value='off'>Manual</button>"
-        "<button name='mode' value='low'>Low</button>"
-        "<button name='mode' value='medlow'>Med-Low</button>"
+        "<button name='mode' value='low'>High</button>"
+        "<button name='mode' value='medlow'>Med-High</button>"
         "<button name='mode' value='med'>Medium</button>"
-        "<button name='mode' value='medhi'>Med-High</button>"
-        "<button name='mode' value='high'>High</button>"
+        "<button name='mode' value='medhi'>Med-Low</button>"
+        "<button name='mode' value='high'>Low</button>"
         "</div></form>"
     ));
 
@@ -343,8 +344,8 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
     if (strstr(buf, "level=light"))       requested = 0;
     else if (strstr(buf, "level=medium")) requested = 50;
     else if (strstr(buf, "level=dark"))   requested = 100;
-    else if (strstr(buf, "delta=up10"))   requested = clamp_int(blinds_position - 10, 0, 100);
-    else if (strstr(buf, "delta=down10")) requested = clamp_int(blinds_position + 10, 0, 100);
+    else if (strstr(buf, "delta=up10"))   requested = clamp_int(blinds_position + 10, 0, 100);
+    else if (strstr(buf, "delta=down10")) requested = clamp_int(blinds_position - 10, 0, 100);
     else {
         httpd_resp_set_status(req, "400 Bad Request");
         return httpd_resp_sendstr(req, "Unknown command");

@@ -4,13 +4,14 @@
 static const char *TAG = "SIGNAL";
 
 // ===== Shared state =====
-int blinds_position      = 0;
+int blinds_position      = 100;  // start fully closed
 volatile bool s_moving   = false;
 volatile bool s_tilting  = false;
 // tilt_status: 0 = slats open, 1 = slats closed
-int tilt_status          = 1;   // assume start CLOSED
-int tilt_percent         = 0;   // 0% open at boot
-int global_is_closed     = 0;   // assume blinds not fully down yet
+int tilt_status          = 1;    // start CLOSED
+int tilt_percent         = 0;    // 0% open at boot (closed)
+int global_is_closed     = 1;    // start fully down
+
 
 int clamp_int(int v, int lo, int hi)
 {
@@ -365,12 +366,12 @@ void motor_init(void)
     ESP_ERROR_CHECK(gpio_config(&tilt_io));
     tilt_motor_stop();
 
-    // Startup assumed state
+        // Startup assumed state
     motor_stop();
-    tilt_status      = 1;
-    tilt_percent     = 0;
-    blinds_position  = 0;
-    global_is_closed = 0;
+    tilt_status      = 1;    // CLOSED
+    tilt_percent     = 0;    // 0% open
+    blinds_position  = 100;  // fully closed
+    global_is_closed = 1;
 
     ESP_LOGI(TAG,
              "Motor init: lift AIN1=%d AIN2=%d ENA(PWM)=%d | tilt IN1=%d IN2=%d ENB(PWM)=%d | STBY=%d",
