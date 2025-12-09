@@ -36,10 +36,6 @@ extern int tilt_status;
 extern int tilt_percent;
 extern int global_is_closed;
 
-extern volatile bool g_emergency_stop;
-
-
-
 // ===== Auto light control =====
 typedef enum {
     AUTO_OFF = 0,
@@ -105,7 +101,7 @@ static void auto_light_task(void *pv)
     while (1) {
         auto_light_mode_t mode = s_auto_mode;
 
-        if (g_emergency_stop || mode == AUTO_OFF) {
+        if (mode == AUTO_OFF) {
             // Emergency or manual mode: do nothing, just wait
             vTaskDelay(pdMS_TO_TICKS(AUTO_LOOP_PERIOD_MS));
             continue;
@@ -286,9 +282,6 @@ static esp_err_t task_post_handler(httpd_req_t *req) {
 }
 
 static esp_err_t stop_post_handler(httpd_req_t *req) {
-    // Latch emergency stop
-    g_emergency_stop = true;
-
     // Hard stop both subsystems
     motor_stop();
     tilt_motor_stop();
@@ -297,19 +290,16 @@ static esp_err_t stop_post_handler(httpd_req_t *req) {
     __atomic_store_n(&s_moving,  false, __ATOMIC_SEQ_CST);
     __atomic_store_n(&s_tilting, false, __ATOMIC_SEQ_CST);
 
-    // Disable auto mode so it doesn't restart things
+    // Turn off auto mode so it doesn't restart things
     auto_set_mode(AUTO_OFF);
 
-    httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_sendstr(req, "EMERGENCY STOP: all motion halted");
+    // Re-render the main UI instead of showing a text page
+    return render_home(req);
 }
 
 
+
 static esp_err_t tilt_post_handler(httpd_req_t *req) {
-    if (g_emergency_stop) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req, "Emergency stop active – motion disabled");
-    }
 
     char buf[64];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
