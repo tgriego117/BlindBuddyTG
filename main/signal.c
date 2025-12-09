@@ -12,6 +12,7 @@ int tilt_status          = 1;    // start CLOSED
 int tilt_percent         = 0;    // 0% open at boot (closed)
 int global_is_closed     = 1;    // start fully down
 
+volatile bool g_emergency_stop = false; 
 
 int clamp_int(int v, int lo, int hi)
 {
@@ -78,8 +79,12 @@ static void move_task(void *pv)
     move_args_t *a = (move_args_t *)pv;
     motor_run_for_ms_blocking(a->dir, a->ms);
 
-    blinds_position  = a->target_percent;
-    global_is_closed = (blinds_position >= 100) ? 1 : 0;
+    if (!g_emergency_stop) {
+        blinds_position  = a->target_percent;
+        global_is_closed = (blinds_position >= 100) ? 1 : 0;
+    } else {
+        ESP_LOGW(TAG, "lift move aborted by emergency stop; leaving position unchanged");
+    }
 
     __atomic_store_n(&s_moving, false, __ATOMIC_SEQ_CST);
     vPortFree(a);
@@ -87,8 +92,13 @@ static void move_task(void *pv)
 }
 
 
+
 void move_blinds_to_percent_time_async(int target_percent)
 {
+    if (g_emergency_stop) {
+        ESP_LOGW(TAG, "emergency stop active; ignoring lift move");
+        return;
+    }
     target_percent = clamp_int(target_percent, 0, 100);
     int cur = blinds_position;
     if (target_percent == cur) return;
@@ -149,6 +159,10 @@ void tilt_motor_stop(void)
 
 static void tilt_run_for_ms_blocking(bool open_direction, int ms)
 {
+    if (g_emergency_stop) {
+        ESP_LOGW(TAG, "emergency stop active; skip tilt_to_percent");
+        return;
+    }
     // Safety: never run if lift is moving
     if (__atomic_load_n(&s_moving, __ATOMIC_SEQ_CST)) {
         ESP_LOGW(TAG, "lift moving; ignoring tilt jog");
@@ -198,6 +212,10 @@ static void tilt_to_percent_blocking_core(int target_pct)
 // Move tilt to a specific "percent open" using timing model
 void tilt_to_percent_blocking(int target_pct)
 {
+    if (g_emergency_stop) {
+        ESP_LOGW(TAG, "emergency stop active; skip tilt_to_percent");
+        return;
+    }
     if (__atomic_load_n(&s_moving, __ATOMIC_SEQ_CST)) {
         ESP_LOGW(TAG, "lift moving; skip tilt_to_percent");
         return;
@@ -258,6 +276,10 @@ out:
 
 void tilt_blinds_async(int desired_tilt_status)
 {
+    if (g_emergency_stop) {
+        ESP_LOGW(TAG, "emergency stop active; skip tilt_to_percent");
+        return;
+    }
     // refuse if lift is moving
     if (__atomic_load_n(&s_moving, __ATOMIC_SEQ_CST)) {
         ESP_LOGW(TAG, "lift moving; not starting tilt");

@@ -57,6 +57,9 @@ extern int tilt_status;
 extern int tilt_percent;
 extern int global_is_closed;
 
+extern volatile bool g_emergency_stop;
+
+
 // ===== API used by http_server.c =====
 int  clamp_int(int v, int lo, int hi);
 

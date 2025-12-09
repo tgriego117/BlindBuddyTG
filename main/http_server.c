@@ -36,6 +36,7 @@ extern int tilt_status;
 extern int tilt_percent;
 extern int global_is_closed;
 
+extern volatile bool g_emergency_stop;
 
 
 
@@ -104,51 +105,47 @@ static void auto_light_task(void *pv)
     while (1) {
         auto_light_mode_t mode = s_auto_mode;
 
-        if (mode != AUTO_OFF) {
-            float out = g_latest_lux1;
-            float in  = g_latest_lux2;
+        if (g_emergency_stop || mode == AUTO_OFF) {
+            // Emergency or manual mode: do nothing, just wait
+            vTaskDelay(pdMS_TO_TICKS(AUTO_LOOP_PERIOD_MS));
+            continue;
+        }
 
-            // If sensors swapped in your wiring, just swap here later.
+        float out = g_latest_lux1;
+        float in  = g_latest_lux2;
 
-            if (mode == AUTO_HIGH) {
-        // Full light: blinds up, slats open
-                move_blinds_to_percent_time_async(100);  // 0% -> blinds up
-                //tilt_blinds_async(1);                  // 0=open => tilt_to_percent_core(100)
-            }
-            else if (mode == AUTO_LOW) {
-        // Blackout: blinds down, slats closed
-                move_blinds_to_percent_time_async(0); // 100% -> blinds fully down
-                tilt_blinds_async(1);                   // 1=closed => tilt_to_percent_core(0)
-            }
+        if (mode == AUTO_HIGH) {
+            move_blinds_to_percent_time_async(0);
+            tilt_blinds_async(0);
+        }
+        else if (mode == AUTO_LOW) {
+            move_blinds_to_percent_time_async(100);
+            tilt_blinds_async(1);
+        }
+        else {
+            float target = auto_get_target_ratio(mode);
+            move_blinds_to_percent_time_async(100);
 
-            else {
-                // Intermediate: blinds down, adjust tilt to hit target ratio
-                float target = auto_get_target_ratio(mode);
-                move_blinds_to_percent_time_async(100); // all the way down
+            if (out > 5.0f) {
+                float ratio = (in <= 0.0f) ? 0.0f : (in / out);
 
-                if (out > 5.0f) {
-                    float ratio = (in <= 0.0f) ? 0.0f : (in / out);
-
-                    if (ratio < target - AUTO_HYSTERESIS) {
-                        // Too dark inside -> open a bit
-                        int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
-                        tilt_to_percent_blocking(new_pct);
-                    } else if (ratio > target + AUTO_HYSTERESIS) {
-                        // Too bright inside -> close a bit
-                        int new_pct = clamp_int(tilt_percent - TILT_NUDGE_PCT, 0, 100);
-                        tilt_to_percent_blocking(new_pct);
-                    }
-                } else {
-                    // It's dark outside anyway: favor opening to grab what we can
+                if (ratio < target - AUTO_HYSTERESIS) {
                     int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
                     tilt_to_percent_blocking(new_pct);
+                } else if (ratio > target + AUTO_HYSTERESIS) {
+                    int new_pct = clamp_int(tilt_percent - TILT_NUDGE_PCT, 0, 100);
+                    tilt_to_percent_blocking(new_pct);
                 }
+            } else {
+                int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
+                tilt_to_percent_blocking(new_pct);
             }
         }
 
         vTaskDelay(pdMS_TO_TICKS(AUTO_LOOP_PERIOD_MS));
     }
 }
+
 
 void start_auto_light_task(void)
 {
@@ -289,19 +286,31 @@ static esp_err_t task_post_handler(httpd_req_t *req) {
 }
 
 static esp_err_t stop_post_handler(httpd_req_t *req) {
+    // Latch emergency stop
+    g_emergency_stop = true;
+
     // Hard stop both subsystems
     motor_stop();
     tilt_motor_stop();
-    // Optionally drop standby to guarantee off:
-    // gpio_set_level(STBY_GPIO, 0);
+    // gpio_set_level(STBY_GPIO, 0);  // optional HW kill
 
-    __atomic_store_n(&s_moving, false, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&s_moving,  false, __ATOMIC_SEQ_CST);
     __atomic_store_n(&s_tilting, false, __ATOMIC_SEQ_CST);
+
+    // Disable auto mode so it doesn't restart things
+    auto_set_mode(AUTO_OFF);
+
     httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_sendstr(req, "All motors stopped");
+    return httpd_resp_sendstr(req, "EMERGENCY STOP: all motion halted");
 }
 
+
 static esp_err_t tilt_post_handler(httpd_req_t *req) {
+    if (g_emergency_stop) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "Emergency stop active – motion disabled");
+    }
+
     char buf[64];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -330,6 +339,11 @@ static esp_err_t tilt_post_handler(httpd_req_t *req) {
 }
 
 static esp_err_t blinds_post_handler(httpd_req_t *req) {
+    if (g_emergency_stop) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "Emergency stop active – motion disabled");
+    }
+
     char buf[96];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) { httpd_resp_send_500(req); return ESP_FAIL; }
@@ -378,6 +392,10 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
 
 static esp_err_t recalibrate_handler(httpd_req_t *req) 
 {
+    if (g_emergency_stop) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "Emergency stop active – motion disabled");
+    }
     xTaskCreatePinnedToCore(recal_task, "recal_task", 3072, NULL, 7, NULL, tskNO_AFFINITY);
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "Recalibration started");
