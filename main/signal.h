@@ -75,4 +75,9 @@ void tilt_to_percent_blocking(int target_pct);
 // same task you were previously creating from the HTTP handler
 void recal_task(void *pv);
 
+//NEW HELPER
+void blinds_motion_abort_update_position(void);
+
+
+
 #endif // SIGNAL_H

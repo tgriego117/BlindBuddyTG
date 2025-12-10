@@ -288,6 +288,7 @@ static esp_err_t task_post_handler(httpd_req_t *req) {
     return httpd_resp_sendstr(req, "Task received");
 }
 
+/*
 static esp_err_t stop_post_handler(httpd_req_t *req) {
     // Hard stop both subsystems
     motor_stop();
@@ -303,6 +304,28 @@ static esp_err_t stop_post_handler(httpd_req_t *req) {
     // Re-render the main UI instead of showing a text page
     return render_home(req);
 }
+    */
+
+//NEW HELPER
+static esp_err_t stop_post_handler(httpd_req_t *req) {
+    // First, estimate where we are in the current lift move (if any)
+    blinds_motion_abort_update_position();
+
+    // Hard stop both subsystems
+    motor_stop();
+    tilt_motor_stop();
+    // gpio_set_level(STBY_GPIO, 0);  // optional HW kill
+
+    __atomic_store_n(&s_moving,  false, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&s_tilting, false, __ATOMIC_SEQ_CST);
+
+    // Turn off auto mode so it doesn't restart things
+    auto_set_mode(AUTO_OFF);
+
+    // Re-render the main UI instead of showing a text page
+    return render_home(req);
+}
+
 
 
 
@@ -377,7 +400,8 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
     // Move lift (async)
     ESP_LOGI(TAG, "Move %d%% -> %d%%", blinds_position, requested);
     move_blinds_to_percent_time_async(requested);
-    blinds_position = requested;      // optimistic
+    //NEW HELPER (comment this line)
+    //blinds_position = requested;      // optimistic
 
     global_is_closed = (requested >= 100) ? 1 : 0;
 

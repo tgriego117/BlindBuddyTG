@@ -1,6 +1,10 @@
 // signal.c
 #include "signal.h"
 
+//NEW HELPER
+#include "esp_timer.h"
+#include <math.h>
+
 static const char *TAG = "SIGNAL";
 
 // ===== Shared state =====
@@ -14,10 +18,79 @@ int global_is_closed     = 1;    // start fully down
 
 volatile bool g_emergency_stop = false; 
 
+//NEW HELPER
+static volatile int     g_motion_start_pos     = 0;
+static volatile int     g_motion_target_pos    = 0;
+static volatile int64_t g_motion_start_time_us = 0;
+static volatile int64_t g_motion_total_time_us = 0;
+static volatile bool    g_motion_active        = false;
+
+
 int clamp_int(int v, int lo, int hi)
 {
     return v < lo ? lo : (v > hi ? hi : v);
 }
+
+//NEW HELPER
+// Begin a timed move from start_pos -> target_pos over total_ms
+static void blinds_motion_begin(int start_pos, int target_pos, int total_ms)
+{
+    // Clamp inputs
+    if (start_pos   < 0)   start_pos   = 0;
+    if (start_pos   > 100) start_pos   = 100;
+    if (target_pos  < 0)   target_pos  = 0;
+    if (target_pos  > 100) target_pos  = 100;
+    if (total_ms    <= 0) {
+        g_motion_active        = false;
+        g_motion_total_time_us = 0;
+        return;
+    }
+
+    g_motion_start_pos     = start_pos;
+    g_motion_target_pos    = target_pos;
+    g_motion_start_time_us = esp_timer_get_time();
+    g_motion_total_time_us = (int64_t)total_ms * 1000;  // ms -> µs
+    g_motion_active        = true;
+}
+
+// Normal completion: we reached the target
+static void blinds_motion_complete(void)
+{
+    blinds_position  = g_motion_target_pos;
+    global_is_closed = (blinds_position >= 100) ? 1 : 0;
+
+    g_motion_active        = false;
+    g_motion_total_time_us = 0;
+}
+
+// Abort mid-move (e.g., emergency stop): estimate where we are
+void blinds_motion_abort_update_position(void)
+{
+    if (!g_motion_active || g_motion_total_time_us <= 0) {
+        // Nothing to update
+        return;
+    }
+
+    int64_t now_us  = esp_timer_get_time();
+    int64_t elapsed = now_us - g_motion_start_time_us;
+    if (elapsed < 0) elapsed = 0;
+    if (elapsed > g_motion_total_time_us) elapsed = g_motion_total_time_us;
+
+    float frac = (float)elapsed / (float)g_motion_total_time_us;
+
+    int delta  = g_motion_target_pos - g_motion_start_pos;
+    int newpos = g_motion_start_pos + (int)lroundf(frac * delta);
+
+    if (newpos < 0)   newpos = 0;
+    if (newpos > 100) newpos = 100;
+
+    blinds_position  = newpos;
+    global_is_closed = (blinds_position >= 100) ? 1 : 0;
+
+    g_motion_active        = false;
+    g_motion_total_time_us = 0;
+}
+
 
 // ===== Lift motor (DC H-bridge) helpers =====
 static inline void motor_apply(bool ain1, bool ain2)
@@ -73,7 +146,7 @@ typedef struct {
     int ms;             // duration to run
     int target_percent;
 } move_args_t;
-
+/*
 static void move_task(void *pv) 
 {
     move_args_t *a = (move_args_t *)pv;
@@ -90,9 +163,35 @@ static void move_task(void *pv)
     vPortFree(a);
     vTaskDelete(NULL);
 }
+    */
+
+//NEW HELPER
+static void move_task(void *pv) 
+{
+    move_args_t *a = (move_args_t *)pv;
+    motor_run_for_ms_blocking(a->dir, a->ms);
+
+    // If we were not globally emergency-stopped and the motion is still "active",
+    // then this is a normal completion -> snap to target.
+    if (!g_emergency_stop) {
+        if (g_motion_active) {
+            blinds_motion_complete();
+        } else {
+            // Motion was aborted earlier; position already estimated in abort helper.
+            ESP_LOGW(TAG, "lift move finished but motion was marked inactive (likely aborted); keeping blinds_position=%d", blinds_position);
+        }
+    } else {
+        ESP_LOGW(TAG, "lift move aborted by emergency stop; leaving blinds_position=%d", blinds_position);
+    }
+
+    __atomic_store_n(&s_moving, false, __ATOMIC_SEQ_CST);
+    vPortFree(a);
+    vTaskDelete(NULL);
+}
 
 
 
+/*
 void move_blinds_to_percent_time_async(int target_percent)
 {
     if (g_emergency_stop) {
@@ -133,6 +232,54 @@ void move_blinds_to_percent_time_async(int target_percent)
         __atomic_store_n(&s_moving, false, __ATOMIC_SEQ_CST);
     }
 }
+    */
+//NEW HELPER
+void move_blinds_to_percent_time_async(int target_percent)
+{
+    if (g_emergency_stop) {
+        ESP_LOGW(TAG, "emergency stop active; ignoring lift move");
+        return;
+    }
+    target_percent = clamp_int(target_percent, 0, 100);
+    int cur = blinds_position;
+    if (target_percent == cur) return;
+
+    // prevent overlap with other lift motion or any ongoing tilt
+    if (__atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST)) {
+        ESP_LOGW(TAG, "tilt active; ignoring lift move to %d%%", target_percent);
+        return;
+    }
+    if (__atomic_exchange_n(&s_moving, true, __ATOMIC_SEQ_CST)) {
+        ESP_LOGW(TAG, "lift moving; ignoring request to %d%%", target_percent);
+        return;
+    }
+
+    int dir       = (target_percent > cur) ? 1 : 0;
+    int delta_pct = dir ? (target_percent - cur) : (cur - target_percent);
+    int ms        = (delta_pct * FULL_TRAVEL_MS) / 100;
+
+    // >>> NEW: start timing model for this move
+    blinds_motion_begin(cur, target_percent, ms);
+
+    move_args_t *a = pvPortMalloc(sizeof(*a));
+    if (!a) {
+        ESP_LOGE(TAG, "malloc failed");
+        __atomic_store_n(&s_moving, false, __ATOMIC_SEQ_CST);
+        g_motion_active = false;
+        return;
+    }
+    a->dir            = dir;
+    a->ms             = ms;
+    a->target_percent = target_percent;
+
+    if (xTaskCreatePinnedToCore(move_task, "move_task", 3072, a, 7, NULL, tskNO_AFFINITY) != pdPASS) {
+        ESP_LOGE(TAG, "xTaskCreate(move_task) failed");
+        vPortFree(a);
+        __atomic_store_n(&s_moving, false, __ATOMIC_SEQ_CST);
+        g_motion_active = false;
+    }
+}
+
 
 // ===== Tilt motor control (PWM on ENB_PWMB_GPIO) =====
 static inline void tilt_pwm_set_percent(int pct)
