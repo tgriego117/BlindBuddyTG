@@ -172,9 +172,10 @@ static void tilt_run_for_ms_blocking(bool open_direction, int ms)
 
     // Drive
     if (open_direction) {
-        tilt_motor_apply(false, true);   // OPEN polarity
+        // flipped: what we call "open" now uses the opposite polarity
+        tilt_motor_apply(true, false);   // OPEN polarity (reversed)
     } else {
-        tilt_motor_apply(true, false);   // CLOSE polarity
+        tilt_motor_apply(false, true);   // CLOSE polarity (reversed)
     }
     tilt_pwm_set_percent(TILT_RUN_PCT);
 
@@ -301,20 +302,22 @@ void recal_task(void *pv)
     motor_stop();
     tilt_motor_stop();
 
-    // Ensure slats CLOSED (blocking)
+    // First, force slats to a known reference: fully CLOSED
     if (!__atomic_load_n(&s_moving, __ATOMIC_SEQ_CST)) {
         tilt_blinds(1);
     }
 
-    // Run lift fully down
+    // Run lift fully down (100% closed on lift)
     move_blinds_to_percent_time_async(100);
     blinds_position  = 100;
     global_is_closed = 1;
 
-    // Final guarantee tilt is closed
-    tilt_blinds(1);
+    // Now swing slats fully OPEN (0% closed / 100% open)
+    tilt_blinds(0);
+
     vTaskDelete(NULL);
 }
+
 
 // ===== HW init (call once in app_main) =====
 void motor_init(void)
@@ -390,8 +393,8 @@ void motor_init(void)
 
         // Startup assumed state
     motor_stop();
-    tilt_status      = 1;    // CLOSED
-    tilt_percent     = 0;    // 0% open
+    tilt_status      = 0;    // CLOSED
+    tilt_percent     = 100;    // 100% open
     blinds_position  = 100;  // fully closed
     global_is_closed = 1;
 

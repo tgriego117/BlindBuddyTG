@@ -40,13 +40,13 @@
 #define LEDC_DUTY_MAX          ((1U<<10)-1)
 
 // Motion model (lift travel timing model)
-#define FULL_TRAVEL_MS         42500            // 0% <-> 100% travel = 30 s
+#define FULL_TRAVEL_MS         48000            // 0% <-> 100% travel = 30 s
 #define RUN_SPEED_PCT          90               // duty % during lift motion
 
 // Tilt timing (slat open/close jog)
-#define TILT_OPEN_MS           300  // ms spin to go CLOSED -> OPEN
-#define TILT_CLOSE_MS          300  // ms spin to go OPEN   -> CLOSED
-#define TILT_RUN_PCT           90   // PWM % for tilt jog
+#define TILT_OPEN_MS           400  // ms spin to go CLOSED -> OPEN
+#define TILT_CLOSE_MS          400  // ms spin to go OPEN   -> CLOSED
+#define TILT_RUN_PCT           60   // PWM % for tilt jog
 
 // ===== Shared state exported to HTTP/UI =====
 extern int blinds_position;

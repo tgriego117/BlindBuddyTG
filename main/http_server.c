@@ -112,10 +112,10 @@ static void auto_light_task(void *pv)
 
         if (mode == AUTO_HIGH) {
             move_blinds_to_percent_time_async(0);
-            tilt_blinds_async(0);
+            //tilt_blinds_async(0);
         }
         else if (mode == AUTO_LOW) {
-            move_blinds_to_percent_time_async(100);
+            move_blinds_to_percent_time_async(100); 
             tilt_blinds_async(1);
         }
         else {
@@ -200,25 +200,24 @@ static esp_err_t render_home(httpd_req_t *req) {
         "</style></head><body><h1>Set Light Level</h1>"
     ));
 
-      // Automatic light level controls
+    // Automatic light level controls
     ESP_ERROR_CHECK(_send_chunk(req,
         "<h2>Automatic Light Level</h2>"
         "<form method='POST' action='/auto'><div class='row'>"
         "<button name='mode' value='off'>Manual</button>"
-        "<button name='mode' value='low'>High</button>"
-        "<button name='mode' value='medlow'>Med-High</button>"
+        "<button name='mode' value='high'>High</button>"
+        "<button name='mode' value='medhi'>Med-High</button>"
         "<button name='mode' value='med'>Medium</button>"
-        "<button name='mode' value='medhi'>Med-Low</button>"
-        "<button name='mode' value='high'>Low</button>"
+        "<button name='mode' value='medlow'>Med-Low</button>"
+        "<button name='mode' value='low'>Low</button>"
         "</div></form>"
     ));
-
 
     // Tilt controls
     ESP_ERROR_CHECK(_send_chunk(req,
         "<form method='POST' action='/tilt'><div class='row'>"
-        "<button name='tilt' value='open'>Open Tilt</button>"
         "<button name='tilt' value='close'>Close Tilt</button>"
+        "<button name='tilt' value='open'>Open Tilt</button>"
         "</div></form>"
         "<form method='POST' action='/stop'><div class='row'>"
         "<button>EMERGENCY STOP</button>"
@@ -229,35 +228,43 @@ static esp_err_t render_home(httpd_req_t *req) {
     ));
 
     char line[192];
-   extern volatile float g_lux_difference;  // in http_server.c
+    extern volatile float g_lux_difference;  // in http_server.c
 
-snprintf(line, sizeof(line),
-         "<h2>Lux A (outside): %.1f lx</h2>"
-         "<h2>Lux B (inside): %.1f lx</h2>"
-         "<h2>Lux Difference: %.1f lx</h2>",
-         g_latest_lux1, g_latest_lux2, g_lux_difference);
-
+    snprintf(line, sizeof(line),
+             "<h2>Lux A (outside): %.1f lx</h2>"
+             "<h2>Lux B (inside): %.1f lx</h2>"
+             "<h2>Lux Difference: %.1f lx</h2>",
+             g_latest_lux1, g_latest_lux2, g_lux_difference);
     ESP_ERROR_CHECK(_send_chunk(req, line));
 
-snprintf(line, sizeof(line),
-         "<h2>Current Blinds Position: %d%%</h2>"
-         "<h2>Tilt: %s (%d%% open)</h2>"
-         "<h2>Auto Mode: %s</h2>"
-         "<h2>Fully Closed?: %s</h2>"
-         "<h2>Busy: Lift=%s, Tilt=%s</h2>",
-         pos,
-         (tilt_status==0) ? "OPEN" : "CLOSED",
-         tilt_percent,
-         auto_mode_str(s_auto_mode),
-         (global_is_closed==1) ? "YES" : "NO",
-         __atomic_load_n(&s_moving, __ATOMIC_SEQ_CST) ? "YES" : "NO",
-         __atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST) ? "YES" : "NO");
+    // --- Map internal tilt_percent (100,90,80,70,60) to 100,75,50,25,0 % open ---
+    // One button press = STEP internal units = 25% physical
+    const int STEP = 10;
 
+    // How many "close" steps from fully open (100)?
+    int steps_from_open = (100 - tilt_percent) / STEP;
+    if (steps_from_open < 0) steps_from_open = 0;
+    if (steps_from_open > 4) steps_from_open = 4;  // cap at 4 steps (0% open)
+
+    int physical_tilt = 100 - steps_from_open * 25;  // 0,25,50,75,100
+
+    snprintf(line, sizeof(line),
+             "<h2>Current Blinds Position: %d%%</h2>"
+             "<h2>Tilt: %s (%d%% open)</h2>"
+             "<h2>Auto Mode: %s</h2>"
+             "<h2>Fully Closed?: %s</h2>"
+             "<h2>Busy: Lift=%s, Tilt=%s</h2>",
+             pos,
+             (tilt_status == 0) ? "OPEN" : "CLOSED",
+             physical_tilt,
+             auto_mode_str(s_auto_mode),
+             (global_is_closed == 1) ? "YES" : "NO",
+             __atomic_load_n(&s_moving,  __ATOMIC_SEQ_CST) ? "YES" : "NO",
+             __atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST) ? "YES" : "NO");
     ESP_ERROR_CHECK(_send_chunk(req, line));
 
     snprintf(line, sizeof(line),
-    "</body></html>");
-
+             "</body></html>");
     ESP_ERROR_CHECK(_send_chunk(req, line));
 
     return httpd_resp_sendstr_chunk(req, NULL);
@@ -300,7 +307,6 @@ static esp_err_t stop_post_handler(httpd_req_t *req) {
 
 
 static esp_err_t tilt_post_handler(httpd_req_t *req) {
-
     char buf[64];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -312,7 +318,9 @@ static esp_err_t tilt_post_handler(httpd_req_t *req) {
     // Manual interaction -> exit auto mode
     auto_set_mode(AUTO_OFF);
 
-    const int STEP = 10;  // 10% per click; tweak this if you want bigger/smaller nudges
+    // FRACTION of full travel per click:
+    // 0.20 = 20% per press, 0.10 = 10%, etc.
+    const int STEP = 10;  // 25% per click right now
 
     if (strstr(buf, "tilt=open")) {
         int target = clamp_int(tilt_percent + STEP, 0, 100);
@@ -327,6 +335,7 @@ static esp_err_t tilt_post_handler(httpd_req_t *req) {
 
     return render_home(req);
 }
+
 
 static esp_err_t blinds_post_handler(httpd_req_t *req) {
     if (g_emergency_stop) {
