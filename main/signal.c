@@ -8,7 +8,7 @@
 static const char *TAG = "SIGNAL";
 
 // ===== Shared state =====
-int blinds_position      = 100;  // start fully closed
+int blinds_position      = 0;  // start fully closed
 volatile bool s_moving   = false;
 volatile bool s_tilting  = false;
 // tilt_status: 0 = slats open, 1 = slats closed
@@ -57,11 +57,11 @@ static void blinds_motion_begin(int start_pos, int target_pos, int total_ms)
 static void blinds_motion_complete(void)
 {
     blinds_position  = g_motion_target_pos;
-    global_is_closed = (blinds_position >= 100) ? 1 : 0;
-
+    global_is_closed = (blinds_position <= 0) ? 1 : 0;
     g_motion_active        = false;
     g_motion_total_time_us = 0;
 }
+
 
 // Abort mid-move (e.g., emergency stop): estimate where we are
 void blinds_motion_abort_update_position(void)
@@ -85,7 +85,8 @@ void blinds_motion_abort_update_position(void)
     if (newpos > 100) newpos = 100;
 
     blinds_position  = newpos;
-    global_is_closed = (blinds_position >= 100) ? 1 : 0;
+    global_is_closed = (blinds_position <= 0) ? 1 : 0;
+
 
     g_motion_active        = false;
     g_motion_total_time_us = 0;
@@ -446,40 +447,28 @@ void tilt_blinds_async(int desired_tilt_status)
 void recal_task(void *pv)
 {
     (void)pv;
+
+    // Snapshot/abort any in-flight lift motion
+    blinds_motion_abort_update_position();
+
     motor_stop();
     tilt_motor_stop();
 
-    // First, force slats to a known reference: fully CLOSED
-    //if (!__atomic_load_n(&s_moving, __ATOMIC_SEQ_CST)) { //if no moving sequence is active, tilt blinds to close
-        //tilt_blinds(1);
-    //}
-    if (blinds_position <= 100) {
-        // Run lift fully down (100% closed on lift)
-        move_blinds_to_percent_time_async(100);
-        blinds_position  = 0; // 0 = fully closed, 100 = fully up
-        global_is_closed = 1;   // 1 = closed 0 = open
-    }
+    __atomic_store_n(&s_moving,  false, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&s_tilting, false, __ATOMIC_SEQ_CST);
 
-    if (tilt_status != 0) {
-        // Now swing slats fully OPEN (0 closed 100 open)
-        tilt_blinds(100);
-        tilt_status  = 0;    // 0 = open, 1 = closed
-        tilt_percent = 100;    // 100 = open, 0 = closed
-    }
+    // 1) Fully close slats (blocking, uses timing model)
+    // desired_tilt_status: 0 = open, 1 = closed
+    tilt_blinds(0);   // fully OPEN
+    // tilt_blinds/tilt_to_percent_blocking_core already update tilt_status/tilt_percent
 
-    // Run lift fully down (100% closed on lift)
-    //move_blinds_to_percent_time_async(0);
-    //blinds_position  = 0; // 0 = fully closed, 100 = fully up
-    //global_is_closed = 1; // 1 = closed 0 = open
-
-    // Now swing slats fully OPEN (0% closed / 100% open)
-    //tilt_blinds(100);
-    //tilt_status      = 0;    // 0 = open, 1 = closed
-    //tilt_percent     = 100;    // 100 = open, 0 = closed
-    
+    // 2) Fully lower the blinds (0% = fully down/closed)
+    move_blinds_to_percent_time_async(0);
+    // Don't manually override blinds_position here; let move_task + blinds_motion_complete() do it.
 
     vTaskDelete(NULL);
 }
+
 
 
 // ===== HW init (call once in app_main) =====
@@ -543,7 +532,6 @@ void motor_init(void)
     };
     ESP_ERROR_CHECK(ledc_channel_config(&ccfg_b));
 
-    // Tilt motor pins
     gpio_config_t tilt_io = {
         .pin_bit_mask = (1ULL<<TILT_IN1_GPIO) | (1ULL<<TILT_IN2_GPIO),
         .mode         = GPIO_MODE_OUTPUT,
@@ -556,10 +544,10 @@ void motor_init(void)
 
         // Startup assumed state
     motor_stop();
-    tilt_status      = 1;    // 0 = open, 1 = closed
-    tilt_percent     = 0;    // 100 = open, 0 = closed
-    blinds_position  = 100;  // 0 = fully closed, 100 = fully up
-    global_is_closed = 0; // 1 = closed 0 = open
+    tilt_status      = 0;    // 0 = open, 1 = closed
+    tilt_percent     = 100;    // 100 = open, 0 = closed
+    blinds_position  = 0;  // 0 = fully closed, 100 = fully up
+    global_is_closed = 1; // 1 = closed 0 = open
 
     ESP_LOGI(TAG,
              "Motor init: lift AIN1=%d AIN2=%d ENA(PWM)=%d | tilt IN1=%d IN2=%d ENB(PWM)=%d | STBY=%d",

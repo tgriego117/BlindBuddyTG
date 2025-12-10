@@ -50,11 +50,11 @@ static auto_light_mode_t s_auto_mode = AUTO_OFF;
 
 // Target inside/outside light ratios for each mode
 // inside_lux ≈ ratio * outside_lux
-#define AUTO_RATIO_LOW        5.00f   // essentially blackout
-#define AUTO_RATIO_MED_LOW    25.00f
-#define AUTO_RATIO_MED        50.00f
-#define AUTO_RATIO_MED_HIGH   75.00f
-#define AUTO_RATIO_HIGH       100.00f
+#define AUTO_RATIO_LOW        .05f   // essentially blackout
+#define AUTO_RATIO_MED_LOW    .25f
+#define AUTO_RATIO_MED        .5f
+#define AUTO_RATIO_MED_HIGH   .75f
+#define AUTO_RATIO_HIGH       1.0f
 
 #define AUTO_HYSTERESIS       0.05f   // +/-5% band so it doesn't hunt
 #define AUTO_LOOP_PERIOD_MS   2000    // check every 2s
@@ -377,9 +377,9 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
     int requested = blinds_position;
 
     // Interpret request
-    if (strstr(buf, "level=light"))       requested = 0;
+    if (strstr(buf, "level=light"))       requested = 100;
     else if (strstr(buf, "level=medium")) requested = 50;
-    else if (strstr(buf, "level=dark"))   requested = 100;
+    else if (strstr(buf, "level=dark"))   requested = 0;
     else if (strstr(buf, "delta=up10"))   requested = clamp_int(blinds_position + 10, 0, 100);
     else if (strstr(buf, "delta=down10")) requested = clamp_int(blinds_position - 10, 0, 100);
     else {
@@ -403,7 +403,7 @@ static esp_err_t blinds_post_handler(httpd_req_t *req) {
     //NEW HELPER (comment this line)
     //blinds_position = requested;      // optimistic
 
-    global_is_closed = (requested >= 100) ? 1 : 0;
+    global_is_closed = (requested <= 0) ? 1 : 0;
 
     // Post-move tilt preference (only if not tilting)
     //if (!__atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST)) {
@@ -420,8 +420,9 @@ static esp_err_t recalibrate_handler(httpd_req_t *req)
         return httpd_resp_sendstr(req, "Emergency stop active – motion disabled");
     }
     xTaskCreatePinnedToCore(recal_task, "recal_task", 3072, NULL, 7, NULL, tskNO_AFFINITY);
-    httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_sendstr(req, "Recalibration started");
+
+    // Re-render main UI instead of plain text
+    return render_home(req);
 }
 
 // /status handler
