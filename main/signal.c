@@ -450,17 +450,33 @@ void recal_task(void *pv)
     tilt_motor_stop();
 
     // First, force slats to a known reference: fully CLOSED
-    if (!__atomic_load_n(&s_moving, __ATOMIC_SEQ_CST)) {
-        tilt_blinds(1);
+    //if (!__atomic_load_n(&s_moving, __ATOMIC_SEQ_CST)) { //if no moving sequence is active, tilt blinds to close
+        //tilt_blinds(1);
+    //}
+    if (blinds_position <= 100) {
+        // Run lift fully down (100% closed on lift)
+        move_blinds_to_percent_time_async(100);
+        blinds_position  = 0; // 0 = fully closed, 100 = fully up
+        global_is_closed = 1;   // 1 = closed 0 = open
+    }
+
+    if (tilt_status != 0) {
+        // Now swing slats fully OPEN (0 closed 100 open)
+        tilt_blinds(100);
+        tilt_status  = 0;    // 0 = open, 1 = closed
+        tilt_percent = 100;    // 100 = open, 0 = closed
     }
 
     // Run lift fully down (100% closed on lift)
-    move_blinds_to_percent_time_async(100);
-    blinds_position  = 100;
-    global_is_closed = 1;
+    //move_blinds_to_percent_time_async(0);
+    //blinds_position  = 0; // 0 = fully closed, 100 = fully up
+    //global_is_closed = 1; // 1 = closed 0 = open
 
     // Now swing slats fully OPEN (0% closed / 100% open)
-    tilt_blinds(0);
+    //tilt_blinds(100);
+    //tilt_status      = 0;    // 0 = open, 1 = closed
+    //tilt_percent     = 100;    // 100 = open, 0 = closed
+    
 
     vTaskDelete(NULL);
 }
@@ -540,10 +556,10 @@ void motor_init(void)
 
         // Startup assumed state
     motor_stop();
-    tilt_status      = 0;    // CLOSED
-    tilt_percent     = 100;    // 100% open
-    blinds_position  = 100;  // fully closed
-    global_is_closed = 1;
+    tilt_status      = 1;    // 0 = open, 1 = closed
+    tilt_percent     = 0;    // 100 = open, 0 = closed
+    blinds_position  = 100;  // 0 = fully closed, 100 = fully up
+    global_is_closed = 0; // 1 = closed 0 = open
 
     ESP_LOGI(TAG,
              "Motor init: lift AIN1=%d AIN2=%d ENA(PWM)=%d | tilt IN1=%d IN2=%d ENB(PWM)=%d | STBY=%d",

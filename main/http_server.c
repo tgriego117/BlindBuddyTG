@@ -111,11 +111,11 @@ static void auto_light_task(void *pv)
         float in  = g_latest_lux2;
 
         if (mode == AUTO_HIGH) {
-            move_blinds_to_percent_time_async(0);
+            move_blinds_to_percent_time_async(100);
             //tilt_blinds_async(0);
         }
         else if (mode == AUTO_LOW) {
-            move_blinds_to_percent_time_async(100); 
+            move_blinds_to_percent_time_async(0); 
             tilt_blinds_async(1);
         }
         else {
