@@ -109,6 +109,22 @@ static void auto_light_task(void *pv)
 
         float out = g_latest_lux1;
         float in  = g_latest_lux2;
+	    float target = auto_get_target_ratio(mode);
+        //move_blinds_to_percent_time_async(0); //changed to 0, blinds need to be lowered
+
+        if (out > 0.0f) { //adjust value as needed
+            float ratio = (in <= 0.0f) ? 0.0f : (in / out);
+            if (ratio < target - AUTO_HYSTERESIS) {
+                int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
+                //tilt_to_percent_blocking(new_pct);
+            } else if (ratio > target + AUTO_HYSTERESIS) {
+                int new_pct = clamp_int(tilt_percent - TILT_NUDGE_PCT, 0, 100);
+                //tilt_to_percent_blocking(new_pct);
+            }
+        } else {
+            int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
+            //tilt_to_percent_blocking(new_pct);
+        }
 
         if (mode == AUTO_HIGH) {
             move_blinds_to_percent_time_async(100);
@@ -118,24 +134,9 @@ static void auto_light_task(void *pv)
             move_blinds_to_percent_time_async(0); 
             tilt_blinds_async(1);
         }
-        else {
-            float target = auto_get_target_ratio(mode);
-            move_blinds_to_percent_time_async(100);
-
-            if (out > 5.0f) {
-                float ratio = (in <= 0.0f) ? 0.0f : (in / out);
-
-                if (ratio < target - AUTO_HYSTERESIS) {
-                    int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
-                    tilt_to_percent_blocking(new_pct);
-                } else if (ratio > target + AUTO_HYSTERESIS) {
-                    int new_pct = clamp_int(tilt_percent - TILT_NUDGE_PCT, 0, 100);
-                    tilt_to_percent_blocking(new_pct);
-                }
-            } else {
-                int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
-                tilt_to_percent_blocking(new_pct);
-            }
+        else if (mode == AUTO_MED || mode == AUTO_MED_HIGH || mode == AUTO_MED_LOW) {
+            move_blinds_to_percent_time_async(0); 
+            tilt_blinds_async(new_pct);
         }
 
         vTaskDelay(pdMS_TO_TICKS(AUTO_LOOP_PERIOD_MS));
