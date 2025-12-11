@@ -5,7 +5,7 @@
 #include "esp_err.h"
 
 #include "driver/gpio.h"
-#include "driver/i2c.h"          // for i2c_scan()
+#include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -13,11 +13,9 @@
 #include "http_server.h"
 #include "signal.h"
 #include "tsl2561.h"
-//#include "light_control.h"
 
 static const char *TAG = "APP";
 
-// Exposed to the HTTP page
 volatile float g_latest_lux1 = 0.0f;  // sensor on I2C0 (SDA=16, SCL=15)
 volatile float g_latest_lux2 = 0.0f;  // sensor on I2C1 (SDA=39, SCL=40)
 volatile float g_lux_difference = 0.0f;
@@ -27,7 +25,7 @@ static float calculate_lux_difference(void) {
     return diff < 0 ? -diff : diff;
 }
 
-// Simple I2C scanner (run after a bus is configured/installed)
+//i2c scan
 static void i2c_scan(i2c_port_t port) {
     ESP_LOGI(TAG, "I2C scan on port %d", port);
     for (int addr = 0x03; addr <= 0x77; ++addr) {
@@ -45,33 +43,26 @@ static void i2c_scan(i2c_port_t port) {
 
 static void sensor_task(void *arg) {
     (void)arg;
+    const gpio_num_t SDA0 = (gpio_num_t)21; //sda gpio21
+    const gpio_num_t SCL0 = (gpio_num_t)20; //scl gpio20
 
-    // ===== I2C pins on your PCB =====
-    // SDA -> GPIO21
-    // SCL -> GPIO20
-    const gpio_num_t SDA0 = (gpio_num_t)21;
-    const gpio_num_t SCL0 = (gpio_num_t)20;
-
-    // ---- Sensor A on I2C0 ----
-    // ADDR floating -> 0x39
     tsl2561_t devA = {
         .port            = I2C_NUM_0,
         .sda             = SDA0,
         .scl             = SCL0,
         .clk_speed_hz    = 100000,
-        .i2c_addr        = 0x39,      // sensor A address
+        .i2c_addr        = 0x39,      //sensor A addr
         .gain_16x        = 0,
-        .integ_time_code = 2          // 402 ms
+        .integ_time_code = 2          //402 ms
     };
 
-    // ---- Sensor B on SAME bus I2C0 ----
-    // ADDR tied LOW (GND) -> 0x29 (make sure your wiring matches this)
+    //sensorB addr
     tsl2561_t devB = {
         .port            = I2C_NUM_0,
         .sda             = SDA0,
         .scl             = SCL0,
         .clk_speed_hz    = 100000,
-        .i2c_addr        = 0x29,      // sensor B address
+        .i2c_addr        = 0x29,      //sensor B addr
         .gain_16x        = 0,
         .integ_time_code = 2
     };
@@ -88,7 +79,7 @@ static void sensor_task(void *arg) {
                  esp_err_to_name(errB), (int)devB.sda, (int)devB.scl, devB.i2c_addr);
     }
 
-    // Scan the ONE bus so you can confirm both addresses show up
+    //scan one bus
     i2c_scan(I2C_NUM_0);
 
     while (1) {
@@ -116,35 +107,27 @@ static void sensor_task(void *arg) {
 }
 
 void app_main(void) {
-    // 0) NVS
+    //NVS init
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    // 1) Motors
+    //motors
     motor_init();
 
-    // 2) Wi-Fi
+    //wifi
     ESP_LOGI(TAG, "Starting Wi-Fi…");
     wifi_init_sta();
 
-    // 3) HTTP server
+    //http server
     ESP_LOGI(TAG, "Starting HTTP server…");
     (void)start_webserver();
 
-    // 4) Sensors task
+    //sensors task
     xTaskCreate(sensor_task, "sensor_task", 4096, NULL, 5, NULL);
 
-    // 4( Light control loop)
+    //light control loop
     start_auto_light_task();
-
-    // 5) Optional: automatic light control (disabled for now)
-    /*
-    bool ok = light_control_start_tsl2561(I2C_NUM_0, 16, 15, 0x39, 1000, 0.25f);
-    if (!ok) {
-        ESP_LOGE(TAG, "Failed to start TSL2561 light control");
-    }
-    */
 }

@@ -44,6 +44,6 @@ void wifi_init_sta(void) {
     cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));   // <— WIFI_IF_STA (not ESP_IF_WIFI_STA)
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));   //WIFI_IF_STA (not ESP_IF_WIFI_STA)
     ESP_ERROR_CHECK(esp_wifi_start());
 }
