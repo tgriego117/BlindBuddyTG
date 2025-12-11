@@ -12,8 +12,8 @@ int blinds_position      = 0;  // start fully closed
 volatile bool s_moving   = false;
 volatile bool s_tilting  = false;
 // tilt_status: 0 = slats open, 1 = slats closed
-int tilt_status          = 1;    // start CLOSED
-int tilt_percent         = 0;    // 0% open at boot (closed)
+//int tilt_status          = 0;    // start CLOSED
+int tilt_percent         = 100;    // 100% open at boot (open)
 int global_is_closed     = 1;    // start fully down
 
 volatile bool g_emergency_stop = false; 
@@ -354,7 +354,7 @@ static void tilt_to_percent_blocking_core(int target_pct)
 
     tilt_percent = target_pct;
     // 1 = CLOSED when 0% open (your convention)
-    tilt_status  = (tilt_percent == 0) ? 1 : 0;
+    //tilt_status  = (tilt_percent == 0) ? 1 : 0;
 }
 
 
@@ -383,16 +383,10 @@ void tilt_to_percent_blocking(int target_pct)
 static void tilt_blinds(int desired_tilt_status)
 {
     desired_tilt_status = desired_tilt_status ? 1 : 0;
-    if (desired_tilt_status == tilt_status) return;
-
-    if (desired_tilt_status == 0) {
-        // fully open
-        tilt_to_percent_blocking_core(100);
-    } else {
-        // fully closed
-        tilt_to_percent_blocking_core(0);
-    }
+    int target_pct = desired_tilt_status ? 0 : 100;
+    tilt_to_percent_blocking_core(target_pct);
 }
+
 
 
 // === Async tilt wrapper (never overlap with lift or other tilt) ===
@@ -443,33 +437,28 @@ void tilt_blinds_async(int desired_tilt_status)
     }
 }
 
-// ===== Recalibration sequence (used by HTTP handler) =====
 void recal_task(void *pv)
 {
     (void)pv;
 
-    // Snapshot/abort any in-flight lift motion
     blinds_motion_abort_update_position();
-
     motor_stop();
     tilt_motor_stop();
 
     __atomic_store_n(&s_moving,  false, __ATOMIC_SEQ_CST);
     __atomic_store_n(&s_tilting, false, __ATOMIC_SEQ_CST);
 
-    // 1) Fully close slats (blocking, uses timing model)
-    // desired_tilt_status: 0 = open, 1 = closed
-    tilt_blinds(0);   // fully OPEN
-    // tilt_blinds/tilt_to_percent_blocking_core already update tilt_status/tilt_percent
+    if (tilt_percent < 100) {
+        // Use core function so we don't get blocked by s_tilting locks
+        tilt_to_percent_blocking_core(100);
+        // tilt_to_percent_blocking_core updates tilt_percent itself
+    }
 
-    // 2) Fully lower the blinds (0% = fully down/closed)
+    // Force blinds fully down
     move_blinds_to_percent_time_async(0);
-    // Don't manually override blinds_position here; let move_task + blinds_motion_complete() do it.
 
     vTaskDelete(NULL);
 }
-
-
 
 // ===== HW init (call once in app_main) =====
 void motor_init(void)
@@ -544,7 +533,7 @@ void motor_init(void)
 
         // Startup assumed state
     motor_stop();
-    tilt_status      = 0;    // 0 = open, 1 = closed
+    //tilt_status      = 0;    // 0 = open, 1 = closed
     tilt_percent     = 100;    // 100 = open, 0 = closed
     blinds_position  = 0;  // 0 = fully closed, 100 = fully up
     global_is_closed = 1; // 1 = closed 0 = open

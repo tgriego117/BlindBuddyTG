@@ -248,20 +248,31 @@ static esp_err_t render_home(httpd_req_t *req) {
 
     int physical_tilt = 100 - steps_from_open * 25;  // 0,25,50,75,100
 
+    // In render_home:
+    // Status / debug info
     snprintf(line, sizeof(line),
-             "<h2>Current Blinds Position: %d%%</h2>"
-             "<h2>Tilt: %s (%d%% open)</h2>"
-             "<h2>Auto Mode: %s</h2>"
-             "<h2>Fully Closed?: %s</h2>"
-             "<h2>Busy: Lift=%s, Tilt=%s</h2>",
-             pos,
-             (tilt_status == 0) ? "OPEN" : "CLOSED",
-             physical_tilt,
-             auto_mode_str(s_auto_mode),
-             (global_is_closed == 1) ? "YES" : "NO",
-             __atomic_load_n(&s_moving,  __ATOMIC_SEQ_CST) ? "YES" : "NO",
-             __atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST) ? "YES" : "NO");
+            "<h2>Current Blinds Position: %d%%</h2>"
+            "<h2>Tilt: %s (%d%% open)</h2>"
+            "<h2>Auto Mode: %s</h2>"
+            "<h2>Fully Closed?: %s</h2>"
+            "<h2>Busy: Lift=%s, Tilt=%s</h2>",
+            pos,
+            (tilt_percent <= 25) ? "CLOSED" : "OPEN",
+            physical_tilt,
+            auto_mode_str(s_auto_mode),
+            (global_is_closed == 1) ? "YES" : "NO",
+            __atomic_load_n(&s_moving,  __ATOMIC_SEQ_CST) ? "YES" : "NO",
+            __atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST) ? "YES" : "NO");
+    ESP_ERROR_CHECK(_send_chunk(req, line));   // <-- MISSING LINE
+
+    // Close HTML
+    snprintf(line, sizeof(line),
+             "</body></html>");
     ESP_ERROR_CHECK(_send_chunk(req, line));
+
+    return httpd_resp_sendstr_chunk(req, NULL);
+
+
 
     snprintf(line, sizeof(line),
              "</body></html>");
@@ -419,6 +430,8 @@ static esp_err_t recalibrate_handler(httpd_req_t *req)
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req, "Emergency stop active – motion disabled");
     }
+    auto_set_mode(AUTO_OFF);
+
     xTaskCreatePinnedToCore(recal_task, "recal_task", 3072, NULL, 7, NULL, tskNO_AFFINITY);
 
     // Re-render main UI instead of plain text
@@ -429,12 +442,12 @@ static esp_err_t recalibrate_handler(httpd_req_t *req)
 static esp_err_t status_handler(httpd_req_t *req) {
     char response[160];
     snprintf(response, sizeof(response),
-             "Blinds Position: %d%%, Tilt:%s, FullyClosed:%s, Busy(Lift)=%s, Busy(Tilt)=%s",
-             blinds_position,
-             (tilt_status==0) ? "OPEN" : "CLOSED",
-             (global_is_closed==1) ? "YES" : "NO",
-             __atomic_load_n(&s_moving, __ATOMIC_SEQ_CST) ? "YES" : "NO",
-             __atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST) ? "YES" : "NO");
+        "Blinds Position: %d%%, Tilt:%s, FullyClosed:%s, Busy(Lift)=%s, Busy(Tilt)=%s",
+        blinds_position,
+        (tilt_percent <= 25) ? "CLOSED" : "OPEN",
+        (global_is_closed==1) ? "YES" : "NO",
+        __atomic_load_n(&s_moving, __ATOMIC_SEQ_CST) ? "YES" : "NO",
+        __atomic_load_n(&s_tilting, __ATOMIC_SEQ_CST) ? "YES" : "NO");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
 }
