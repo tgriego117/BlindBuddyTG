@@ -40,7 +40,7 @@
 #define LEDC_DUTY_MAX          ((1U<<10)-1)
 
 // Motion model (lift travel timing model)
-#define FULL_TRAVEL_MS         35000            // 0% <-> 100% travel = 30 s
+#define FULL_TRAVEL_MS         40000            // 0% <-> 100% travel = 30 s
 #define RUN_SPEED_PCT          90               // duty % during lift motion
 
 // Tilt timing (slat open/close jog)

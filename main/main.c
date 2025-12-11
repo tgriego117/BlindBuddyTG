@@ -23,7 +23,7 @@ volatile float g_latest_lux2 = 0.0f;  // sensor on I2C1 (SDA=39, SCL=40)
 volatile float g_lux_difference = 0.0f;
 
 static float calculate_lux_difference(void) {
-    float diff = g_latest_lux1 - g_latest_lux2;
+    float diff = (g_latest_lux1 - g_latest_lux2);
     return diff < 0 ? -diff : diff;
 }
 

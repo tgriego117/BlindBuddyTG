@@ -51,13 +51,13 @@ static auto_light_mode_t s_auto_mode = AUTO_OFF;
 // Target inside/outside light ratios for each mode
 // inside_lux ≈ ratio * outside_lux
 #define AUTO_RATIO_LOW        .05f   // essentially blackout
-#define AUTO_RATIO_MED_LOW    .25f
-#define AUTO_RATIO_MED        .5f
-#define AUTO_RATIO_MED_HIGH   .75f
+#define AUTO_RATIO_MED_LOW    .20f
+#define AUTO_RATIO_MED        .45f
+#define AUTO_RATIO_MED_HIGH   .90f
 #define AUTO_RATIO_HIGH       1.0f
 
 #define AUTO_HYSTERESIS       0.05f   // +/-5% band so it doesn't hunt
-#define AUTO_LOOP_PERIOD_MS   2000    // check every 2s
+#define AUTO_LOOP_PERIOD_MS   1000    // check every 2s
 
 // How hard each "nudge" of tilt moves (as % of full range)
 #define TILT_NUDGE_PCT        1
@@ -107,41 +107,62 @@ static void auto_light_task(void *pv)
             continue;
         }
 
-        float out = g_latest_lux1;
-        float in  = g_latest_lux2;
-	    float target = auto_get_target_ratio(mode);
-        //move_blinds_to_percent_time_async(0); //changed to 0, blinds need to be lowered
-
-        if (out > 0.0f) { //adjust value as needed
-            float ratio = (in <= 0.0f) ? 0.0f : (in / out);
-            if (ratio < target - AUTO_HYSTERESIS) {
-                int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
-                //tilt_to_percent_blocking(new_pct);
-            } else if (ratio > target + AUTO_HYSTERESIS) {
-                int new_pct = clamp_int(tilt_percent - TILT_NUDGE_PCT, 0, 100);
-                //tilt_to_percent_blocking(new_pct);
-            }
-        } else {
-            int new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
-            //tilt_to_percent_blocking(new_pct);
-        }
+        float out = g_latest_lux1;  // outside
+        float in  = g_latest_lux2;  // inside
+        float target = auto_get_target_ratio(mode);
 
         if (mode == AUTO_HIGH) {
             move_blinds_to_percent_time_async(100);
-            //tilt_blinds_async(0);
+            vTaskDelay(pdMS_TO_TICKS(AUTO_LOOP_PERIOD_MS));
+            continue;
         }
         else if (mode == AUTO_LOW) {
-            move_blinds_to_percent_time_async(0); 
+            move_blinds_to_percent_time_async(0);
             tilt_blinds_async(1);
-        }
-        else if (mode == AUTO_MED || mode == AUTO_MED_HIGH || mode == AUTO_MED_LOW) {
-            move_blinds_to_percent_time_async(0); 
-            tilt_blinds_async(new_pct);
+            vTaskDelay(pdMS_TO_TICKS(AUTO_LOOP_PERIOD_MS));
+            continue;
         }
 
+        // For MED / MED_LOW / MED_HIGH:
+        // Drop blinds all the way down first (if that's your design rule)
+        move_blinds_to_percent_time_async(0);
+
+        if (out <= 3.0f) {
+            // Too dark outside to control by ratio → do nothing for now
+            vTaskDelay(pdMS_TO_TICKS(AUTO_LOOP_PERIOD_MS));
+            continue;
+        }
+
+        // Correct ratio: inside / outside
+        float ratio = (in <= 0.0f) ? 0.0f : (out / in);
+        float low_band  = target - AUTO_HYSTERESIS;
+        float high_band = target + AUTO_HYSTERESIS;
+
+        int new_pct = tilt_percent;  // assume you track current tilt globally
+
+        if (ratio < low_band) {
+            // Room too dark relative to outside → open slats slightly
+            new_pct = clamp_int(tilt_percent + TILT_NUDGE_PCT, 0, 100);
+            tilt_to_percent_blocking(new_pct);
+            ESP_LOGI(TAG, "AUTO: ratio=%.2f < %.2f → tilt=%d%%",
+                     ratio, low_band, new_pct);
+        } else if (ratio > high_band) {
+            // Room too bright relative to outside → close slats slightly
+            new_pct = clamp_int(tilt_percent - TILT_NUDGE_PCT, 0, 100);
+            tilt_to_percent_blocking(new_pct);
+            ESP_LOGI(TAG, "AUTO: ratio=%.2f > %.2f → tilt=%d%%",
+                     ratio, high_band, new_pct);
+        } else {
+            // Already inside the hysteresis band → no move
+            ESP_LOGI(TAG, "AUTO: ratio=%.2f within [%.2f, %.2f], tilt=%d%%",
+                     ratio, low_band, high_band, tilt_percent);
+        }
+
+        // Wait 2 seconds before next 1% nudge
         vTaskDelay(pdMS_TO_TICKS(AUTO_LOOP_PERIOD_MS));
     }
 }
+
 
 
 void start_auto_light_task(void)
@@ -232,8 +253,8 @@ static esp_err_t render_home(httpd_req_t *req) {
     extern volatile float g_lux_difference;  // in http_server.c
 
     snprintf(line, sizeof(line),
-             "<h2>Lux A (outside): %.1f lx</h2>"
-             "<h2>Lux B (inside): %.1f lx</h2>"
+             "<h2>Lux A (inside): %.1f lx</h2>"
+             "<h2>Lux B (outside): %.1f lx</h2>"
              "<h2>Lux Difference: %.1f lx</h2>",
              g_latest_lux1, g_latest_lux2, g_lux_difference);
     ESP_ERROR_CHECK(_send_chunk(req, line));
